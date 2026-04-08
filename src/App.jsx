@@ -134,6 +134,26 @@ const formatDate = (value) => new Date(value).toLocaleDateString('zh-CN');
 const postMetaStorageKey = 'ai-profile-post-meta';
 const markdownImagePattern = /^!\[(.*?)\]\((https?:\/\/[^\s)]+)\)$/i;
 
+const extractImageFileFromClipboard = (clipboardData) => {
+  const clipboardItems = Array.from(clipboardData?.items || []);
+  const itemFile = clipboardItems.find((item) => item.type.startsWith('image/'))?.getAsFile();
+  if (itemFile) return itemFile;
+
+  const clipboardFiles = Array.from(clipboardData?.files || []);
+  const fileImage = clipboardFiles.find((file) => file.type.startsWith('image/'));
+  if (fileImage) return fileImage;
+
+  return null;
+};
+
+const extractImageUrlFromClipboard = (clipboardData) => {
+  const html = clipboardData?.getData?.('text/html') || '';
+  if (!html) return '';
+
+  const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+  return match?.[1] || '';
+};
+
 const seededLikeCounts = [812, 933, 969, 1105, 1252, 1373, 1509, 1656];
 const seededCommentLibrary = [
   { author: 'Mia', content: '这篇的结构很顺，读完会记住重点。', created_at: '2026-04-01T09:20:00.000Z' },
@@ -486,9 +506,7 @@ function AdminPage({ session, posts, onRequireRefresh }) {
   };
 
   const handleCoverPaste = async (event) => {
-    const file = Array.from(event.clipboardData?.items || [])
-      .find((item) => item.type.startsWith('image/'))
-      ?.getAsFile();
+    const file = extractImageFileFromClipboard(event.clipboardData);
 
     if (!file) return;
     event.preventDefault();
@@ -581,13 +599,24 @@ function AdminPage({ session, posts, onRequireRefresh }) {
   };
 
   const handleEditorPaste = async (event) => {
-    const file = Array.from(event.clipboardData?.items || [])
-      .find((item) => item.type.startsWith('image/'))
-      ?.getAsFile();
+    const file = extractImageFileFromClipboard(event.clipboardData);
+    if (file) {
+      event.preventDefault();
+      await insertImageIntoContent(file, 'Pasted image');
+      return;
+    }
 
-    if (!file) return;
+    const pastedImageUrl = extractImageUrlFromClipboard(event.clipboardData);
+    if (!pastedImageUrl || !textareaRef.current) return;
+
     event.preventDefault();
-    await insertImageIntoContent(file, 'Pasted image');
+    const { selectionStart, selectionEnd, value } = textareaRef.current;
+    const imageMarkup = `![Pasted image](${pastedImageUrl})`;
+    const nextValue = `${value.slice(0, selectionStart)}${imageMarkup}${value.slice(selectionEnd)}`;
+    const cursorPosition = selectionStart + imageMarkup.length;
+
+    updateContentSelection(nextValue, cursorPosition, cursorPosition);
+    setSuccess('Image link inserted into content');
   };
 
   const handleContentImageFile = async (event) => {
