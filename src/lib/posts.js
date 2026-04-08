@@ -10,6 +10,7 @@ const normalizePost = (row) => ({
   excerpt: row.excerpt || '',
   content: typeof row.content === 'string' ? row.content : '',
   cover_url: row.cover_url || '',
+  cover_aspect_ratio: row.cover_aspect_ratio || '16 / 9',
 });
 
 export async function getPublishedPosts() {
@@ -64,6 +65,7 @@ export async function savePost(post) {
     excerpt: post.excerpt || '',
     content: post.content || '',
     cover_url: post.cover_url || '',
+    cover_aspect_ratio: post.cover_aspect_ratio || '16 / 9',
     status: post.status,
     published_at: post.status === 'published' ? post.published_at || new Date().toISOString() : null,
   };
@@ -92,6 +94,10 @@ export async function uploadCover(file) {
   if (error) throw error;
   const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
   return data.publicUrl;
+}
+
+export async function uploadContentImage(file) {
+  return uploadCover(file);
 }
 
 export async function signInWithPassword(email, password) {

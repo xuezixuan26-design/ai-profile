@@ -34,6 +34,7 @@ import {
   signInWithPassword,
   signOut,
   uploadCover,
+  uploadContentImage,
 } from './lib/posts';
 import { isSupabaseConfigured } from './lib/supabase';
 
@@ -101,8 +102,17 @@ const initialForm = {
   excerpt: '',
   content: '',
   cover_url: '',
+  cover_aspect_ratio: '16 / 9',
   status: 'published',
 };
+
+const coverAspectRatioOptions = [
+  { value: '1 / 1', label: 'Square 1:1' },
+  { value: '4 / 3', label: 'Classic 4:3' },
+  { value: '3 / 2', label: 'Photo 3:2' },
+  { value: '16 / 9', label: 'Wide 16:9' },
+  { value: '21 / 9', label: 'Cinema 21:9' },
+];
 
 const slugify = (value) =>
   value
@@ -122,6 +132,7 @@ const getRouteFromHash = () => {
 
 const formatDate = (value) => new Date(value).toLocaleDateString('zh-CN');
 const postMetaStorageKey = 'ai-profile-post-meta';
+const markdownImagePattern = /^!\[(.*?)\]\((https?:\/\/[^\s)]+)\)$/i;
 
 const seededLikeCounts = [812, 933, 969, 1105, 1252, 1373, 1509, 1656];
 const seededCommentLibrary = [
@@ -204,6 +215,18 @@ const renderRichContent = (content) =>
         <h2 key={`${line}-${index}`} className="text-2xl font-black" style={{ paddingLeft: `${Math.min(indent, 12) * 0.65}rem` }}>
           {renderInlineFormatting(trimmed.slice(3))}
         </h2>
+      );
+    }
+
+    const markdownImageMatch = trimmed.match(markdownImagePattern);
+    if (markdownImageMatch) {
+      const [, altText, imageUrl] = markdownImageMatch;
+
+      return (
+        <figure key={`${line}-${index}`} className="overflow-hidden rounded-[1.5rem] bg-white">
+          <img src={imageUrl} alt={altText || 'Article image'} className="w-full rounded-[1.5rem] object-cover" />
+          {altText ? <figcaption className="px-2 pt-3 text-sm text-stone-400">{altText}</figcaption> : null}
+        </figure>
       );
     }
 
@@ -423,6 +446,7 @@ function AdminPage({ session, posts, onRequireRefresh }) {
   const [fontSize, setFontSize] = useState(16);
   const coverPasteRef = useRef(null);
   const textareaRef = useRef(null);
+  const contentImageInputRef = useRef(null);
 
   const submitLogin = async (event) => {
     event.preventDefault();
@@ -527,6 +551,51 @@ function AdminPage({ session, posts, onRequireRefresh }) {
     return `${index + 1}. ${stripped}`;
   });
 
+  const insertImageIntoContent = async (file, altText = 'Image') => {
+    if (!file || !textareaRef.current) return;
+
+    const { selectionStart, selectionEnd, value } = textareaRef.current;
+    setSaving(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const url = await uploadContentImage(file);
+      if (!url) return;
+
+      const imageMarkup = `![${altText}](${url})`;
+      const needsLeadingBreak = selectionStart > 0 && value[selectionStart - 1] !== '\n';
+      const needsTrailingBreak = selectionEnd < value.length && value[selectionEnd] !== '\n';
+      const prefix = needsLeadingBreak ? '\n\n' : '';
+      const suffix = needsTrailingBreak ? '\n\n' : '';
+      const nextValue = `${value.slice(0, selectionStart)}${prefix}${imageMarkup}${suffix}${value.slice(selectionEnd)}`;
+      const cursorPosition = selectionStart + prefix.length + imageMarkup.length;
+
+      updateContentSelection(nextValue, cursorPosition, cursorPosition);
+      setSuccess('Image inserted into content');
+    } catch (err) {
+      setError(err.message || 'Image upload failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEditorPaste = async (event) => {
+    const file = Array.from(event.clipboardData?.items || [])
+      .find((item) => item.type.startsWith('image/'))
+      ?.getAsFile();
+
+    if (!file) return;
+    event.preventDefault();
+    await insertImageIntoContent(file, 'Pasted image');
+  };
+
+  const handleContentImageFile = async (event) => {
+    const file = event.target.files?.[0];
+    await insertImageIntoContent(file, file?.name?.replace(/\.[^.]+$/, '') || 'Uploaded image');
+    event.target.value = '';
+  };
+
   const submitPost = async (event) => {
     event.preventDefault();
     setSaving(true);
@@ -619,6 +688,7 @@ function AdminPage({ session, posts, onRequireRefresh }) {
                   excerpt: post.excerpt || '',
                   content: post.content || '',
                   cover_url: post.cover_url || '',
+                  cover_aspect_ratio: post.cover_aspect_ratio || '16 / 9',
                   status: post.status || 'draft',
                 })
               }
@@ -744,6 +814,11 @@ function AdminPage({ session, posts, onRequireRefresh }) {
                 <Outdent size={14} className="mr-2" />
                 Outdent
               </button>
+              <label className="inline-flex cursor-pointer items-center rounded-full border border-stone-200 px-3 py-2 text-sm font-medium text-stone-700">
+                <ImagePlus size={14} className="mr-2" />
+                Image
+                <input ref={contentImageInputRef} type="file" accept="image/*" className="hidden" onChange={handleContentImageFile} />
+              </label>
             </div>
             <div className="relative z-0 bg-white p-1" onClick={focusEditor}>
               <textarea
@@ -756,13 +831,16 @@ function AdminPage({ session, posts, onRequireRefresh }) {
                 style={{ fontSize: `${fontSize}px`, lineHeight: 1.9 }}
                 placeholder="Write the post here. Project, Learning, Insight, and Journal all share this editor."
                 value={form.content}
+                onPaste={handleEditorPaste}
                 onClick={focusEditor}
                 onFocus={focusEditor}
                 onChange={(e) => setForm((prev) => ({ ...prev, content: e.target.value }))}
               />
             </div>
           </div>
-          <p className="text-sm text-stone-500">The toolbar stays fixed while you write. Select text to change size, bold, lists, quotes, and indent.</p>
+          <p className="text-sm text-stone-500">
+            The toolbar stays fixed while you write. Select text to change size, bold, lists, quotes, and indent. You can also paste an image directly into the editor.
+          </p>
         </div>
 
         <div className="space-y-4">
@@ -774,7 +852,9 @@ function AdminPage({ session, posts, onRequireRefresh }) {
             className="flex min-h-[180px] cursor-text flex-col items-center justify-center rounded-[1.75rem] border-2 border-dashed border-stone-300 bg-stone-50 px-6 py-8 text-center outline-none transition-all focus:border-black focus:bg-white"
           >
             {form.cover_url ? (
-              <img src={form.cover_url} alt="Cover preview" className="h-40 w-full rounded-[1.25rem] object-cover" />
+              <div className="w-full overflow-hidden rounded-[1.25rem]" style={{ aspectRatio: form.cover_aspect_ratio || '16 / 9' }}>
+                <img src={form.cover_url} alt="Cover preview" className="h-full w-full rounded-[1.25rem] object-cover" />
+              </div>
             ) : (
               <>
                 <ImagePlus size={24} className="text-stone-400" />
@@ -783,13 +863,24 @@ function AdminPage({ session, posts, onRequireRefresh }) {
               </>
             )}
           </div>
-          <div className="grid gap-4 md:grid-cols-[1fr_auto_auto] md:items-center">
+          <div className="grid gap-4 md:grid-cols-[1fr_220px_auto_auto] md:items-center">
             <input
               className="rounded-2xl border border-stone-200 bg-white px-4 py-3 outline-none"
               placeholder="Cover image URL"
               value={form.cover_url}
               onChange={(e) => setForm((prev) => ({ ...prev, cover_url: e.target.value }))}
             />
+            <select
+              className="rounded-2xl border border-stone-200 bg-white px-4 py-3 outline-none"
+              value={form.cover_aspect_ratio}
+              onChange={(e) => setForm((prev) => ({ ...prev, cover_aspect_ratio: e.target.value }))}
+            >
+              {coverAspectRatioOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
             <label className="inline-flex cursor-pointer items-center justify-center rounded-full border border-stone-200 bg-white px-4 py-3 text-sm">
               <ImagePlus size={14} className="mr-2" />
               Upload cover
@@ -1118,7 +1209,12 @@ const App = () => {
 
             <article className="overflow-hidden rounded-[2.2rem] border border-stone-200 bg-white">
               {selectedPost.cover_url ? (
-                <img src={selectedPost.cover_url} alt={selectedPost.title} className="h-80 w-full object-cover" />
+                <div
+                  className="overflow-hidden"
+                  style={{ aspectRatio: selectedPost.cover_aspect_ratio || '16 / 9' }}
+                >
+                  <img src={selectedPost.cover_url} alt={selectedPost.title} className="h-full w-full object-cover" />
+                </div>
               ) : null}
               <div className="space-y-7 p-8 md:p-10">
                 <p className="text-sm text-stone-400">

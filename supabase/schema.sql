@@ -8,6 +8,7 @@ create table if not exists public.posts (
   excerpt text default '',
   content text not null default '',
   cover_url text default '',
+  cover_aspect_ratio text not null default '16 / 9',
   status text not null default 'draft' check (status in ('draft', 'published')),
   published_at timestamptz,
   created_at timestamptz not null default now(),
@@ -16,6 +17,9 @@ create table if not exists public.posts (
 
 alter table public.posts
 add column if not exists board text not null default 'thinking';
+
+alter table public.posts
+add column if not exists cover_aspect_ratio text not null default '16 / 9';
 
 alter table public.posts
 drop constraint if exists posts_board_check;
