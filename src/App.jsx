@@ -7,6 +7,7 @@ import {
   FolderOpen,
   Github,
   Heading2,
+  Heart,
   ImagePlus,
   Indent,
   List,
@@ -14,10 +15,12 @@ import {
   Loader2,
   Mail,
   Menu,
+  MessageCircle,
   Monitor,
   Outdent,
   PenSquare,
   Quote,
+  Trash2,
   TrendingUp,
   User,
   X,
@@ -118,6 +121,55 @@ const getRouteFromHash = () => {
 };
 
 const formatDate = (value) => new Date(value).toLocaleDateString('zh-CN');
+const postMetaStorageKey = 'ai-profile-post-meta';
+
+const seededLikeCounts = [812, 933, 969, 1105, 1252, 1373, 1509, 1656];
+const seededCommentLibrary = [
+  { author: 'Mia', content: '这篇的结构很顺，读完会记住重点。', created_at: '2026-04-01T09:20:00.000Z' },
+  { author: 'Noah', content: '这一段很有共鸣，尤其是对方法的拆解。', created_at: '2026-04-02T13:40:00.000Z' },
+  { author: 'Ava', content: '标题和正文的气质是统一的，很自然。', created_at: '2026-04-03T18:15:00.000Z' },
+  { author: 'Leo', content: '如果后面继续写这个主题，我会想继续看。', created_at: '2026-04-04T08:05:00.000Z' },
+  { author: 'Iris', content: '信息密度刚好，不会太满。', created_at: '2026-04-05T16:30:00.000Z' },
+];
+
+const getSlugHash = (value = '') =>
+  Array.from(value).reduce((total, character) => total + character.charCodeAt(0), 0);
+
+const createSeededComments = (slug = '') => {
+  const hash = getSlugHash(slug);
+  const commentCount = (hash % 2) + 2;
+
+  return Array.from({ length: commentCount }, (_, index) => {
+    const template = seededCommentLibrary[(hash + index) % seededCommentLibrary.length];
+
+    return {
+      id: `${slug || 'post'}-seed-${index}`,
+      author: template.author,
+      content: template.content,
+      created_at: template.created_at,
+    };
+  });
+};
+
+const createInitialPostMeta = (slug = '') => {
+  const hash = getSlugHash(slug);
+
+  return {
+    likes: seededLikeCounts[hash % seededLikeCounts.length],
+    comments: createSeededComments(slug),
+  };
+};
+
+const readPostMetaStorage = () => {
+  if (typeof window === 'undefined') return {};
+
+  try {
+    const raw = window.localStorage.getItem(postMetaStorageKey);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
 
 const renderInlineFormatting = (text) => {
   const segments = text.split(/(\*\*.*?\*\*)/g);
@@ -778,6 +830,8 @@ const App = () => {
   const [publishedPosts, setPublishedPosts] = useState([]);
   const [adminPosts, setAdminPosts] = useState([]);
   const [selectedPost, setSelectedPost] = useState(null);
+  const [postMeta, setPostMeta] = useState(() => readPostMetaStorage());
+  const [commentDraft, setCommentDraft] = useState('');
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -820,6 +874,24 @@ const App = () => {
     refreshData(route);
   }, [route.view, route.slug]);
 
+  useEffect(() => {
+    if (!selectedPost?.slug) return;
+
+    setPostMeta((current) => {
+      if (current[selectedPost.slug]) return current;
+
+      return {
+        ...current,
+        [selectedPost.slug]: createInitialPostMeta(selectedPost.slug),
+      };
+    });
+  }, [selectedPost?.slug]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(postMetaStorageKey, JSON.stringify(postMeta));
+  }, [postMeta]);
+
   const postsByBoard = useMemo(
     () =>
       publishedPosts.reduce(
@@ -858,6 +930,67 @@ const App = () => {
   };
 
   const currentTab = route.view === 'post' ? selectedPost?.board || 'thinking' : route.view || 'home';
+  const currentPostMeta = selectedPost?.slug ? postMeta[selectedPost.slug] || createInitialPostMeta(selectedPost.slug) : null;
+
+  const incrementLikes = () => {
+    if (!selectedPost?.slug) return;
+
+    setPostMeta((current) => {
+      const currentMeta = current[selectedPost.slug] || createInitialPostMeta(selectedPost.slug);
+
+      return {
+        ...current,
+        [selectedPost.slug]: {
+          ...currentMeta,
+          likes: currentMeta.likes + 1,
+        },
+      };
+    });
+  };
+
+  const submitComment = () => {
+    if (!selectedPost?.slug) return;
+
+    const trimmed = commentDraft.trim();
+    if (!trimmed) return;
+
+    setPostMeta((current) => {
+      const currentMeta = current[selectedPost.slug] || createInitialPostMeta(selectedPost.slug);
+
+      return {
+        ...current,
+        [selectedPost.slug]: {
+          ...currentMeta,
+          comments: [
+            ...currentMeta.comments,
+            {
+              id: `${Date.now()}`,
+              author: 'You',
+              content: trimmed,
+              created_at: new Date().toISOString(),
+            },
+          ],
+        },
+      };
+    });
+    setCommentDraft('');
+  };
+
+  const deleteComment = (commentId) => {
+    if (!selectedPost?.slug) return;
+
+    setPostMeta((current) => {
+      const currentMeta = current[selectedPost.slug] || createInitialPostMeta(selectedPost.slug);
+
+      return {
+        ...current,
+        [selectedPost.slug]: {
+          ...currentMeta,
+          comments: currentMeta.comments.filter((comment) => comment.id !== commentId),
+        },
+      };
+    });
+  };
 
   return (
     <div className="min-h-screen bg-[#fbf8f1] text-[#1a1a1a] selection:bg-amber-100">
@@ -1003,8 +1136,77 @@ const App = () => {
                     <div className="space-y-3">{renderRichContent(selectedPost.content)}</div>
                   )}
                 </div>
+                <div className="flex flex-wrap items-center gap-3 border-t border-stone-200 pt-2">
+                  <button
+                    type="button"
+                    onClick={incrementLikes}
+                    className="inline-flex items-center rounded-full border border-stone-200 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-700 transition-all hover:border-black hover:text-black"
+                  >
+                    <Heart size={15} className="mr-2" />
+                    {currentPostMeta?.likes || 0}
+                  </button>
+                  <div className="inline-flex items-center rounded-full border border-stone-200 bg-stone-50 px-4 py-2 text-sm font-semibold text-stone-700">
+                    <MessageCircle size={15} className="mr-2" />
+                    {currentPostMeta?.comments.length || 0} comments
+                  </div>
+                </div>
               </div>
             </article>
+
+            <section className="rounded-[2.2rem] border border-stone-200 bg-white p-8 md:p-10">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm uppercase tracking-[0.24em] text-stone-400">Comments</p>
+                  <h2 className="mt-3 text-3xl font-black tracking-tight">Leave a note</h2>
+                </div>
+                <div className="text-sm text-stone-500">{currentPostMeta?.comments.length || 0} total</div>
+              </div>
+
+              <div className="mt-6 space-y-4">
+                <textarea
+                  rows={4}
+                  value={commentDraft}
+                  onChange={(event) => setCommentDraft(event.target.value)}
+                  placeholder="Write a comment here..."
+                  className="w-full rounded-[1.5rem] border border-stone-200 bg-stone-50 px-5 py-4 text-base outline-none transition-all focus:border-black focus:bg-white"
+                />
+                <button
+                  type="button"
+                  onClick={submitComment}
+                  className="inline-flex items-center rounded-full bg-black px-5 py-3 text-sm font-semibold text-white"
+                >
+                  Post comment
+                </button>
+              </div>
+
+              <div className="mt-8 space-y-4">
+                {(currentPostMeta?.comments || []).map((comment) => (
+                  <div key={comment.id} className="rounded-[1.5rem] border border-stone-200 bg-stone-50 p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="font-semibold text-stone-900">{comment.author}</p>
+                        <p className="mt-1 text-sm text-stone-400">{formatDate(comment.created_at)}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => deleteComment(comment.id)}
+                        className="inline-flex items-center rounded-full border border-stone-200 bg-white px-3 py-2 text-xs font-semibold text-stone-600 transition-all hover:border-black hover:text-black"
+                      >
+                        <Trash2 size={13} className="mr-2" />
+                        Delete
+                      </button>
+                    </div>
+                    <p className="mt-4 text-base leading-8 text-stone-700">{comment.content}</p>
+                  </div>
+                ))}
+
+                {(currentPostMeta?.comments || []).length === 0 ? (
+                  <div className="rounded-[1.5rem] border border-dashed border-stone-300 bg-stone-50 p-6 text-stone-500">
+                    No comments yet. You can add one above, or keep this post clean.
+                  </div>
+                ) : null}
+              </div>
+            </section>
           </div>
         ) : null}
 
