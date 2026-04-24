@@ -36,7 +36,6 @@ import {
   uploadCover,
   uploadContentImage,
 } from './lib/posts';
-import { isSupabaseConfigured } from './lib/supabase';
 
 const profile = {
   name: 'jacinda.xue',
@@ -132,7 +131,7 @@ const getRouteFromHash = () => {
 
 const formatDate = (value) => new Date(value).toLocaleDateString('zh-CN');
 const postMetaStorageKey = 'ai-profile-post-meta';
-const markdownImagePattern = /^!\[(.*?)\]\((https?:\/\/[^\s)]+)\)$/i;
+const markdownImagePattern = /^!\[(.*?)\]\(((?:https?:\/\/|data:image\/)[^\s)]+)\)$/i;
 
 const extractImageFileFromClipboard = (clipboardData) => {
   const clipboardItems = Array.from(clipboardData?.items || []);
@@ -655,7 +654,7 @@ function AdminPage({ session, posts, onRequireRefresh }) {
           <p className="text-sm uppercase tracking-[0.24em] text-stone-400">Admin</p>
           <h2 className="mt-3 text-4xl font-black tracking-tight">Admin Editor</h2>
           <p className="mt-4 text-lg leading-8 text-stone-600">
-            One editor for all four boards. Pick a board, publish once, and the post lands in the right section automatically.
+            Local editor for all four boards. Static posts are always available, and new drafts are saved in this browser.
           </p>
         </div>
         <form onSubmit={submitLogin} className="space-y-4 rounded-[2rem] border border-stone-200 bg-white p-8">
@@ -677,9 +676,7 @@ function AdminPage({ session, posts, onRequireRefresh }) {
             {authLoading ? <Loader2 size={14} className="mr-2 animate-spin" /> : null}
             Sign in
           </button>
-          {!isSupabaseConfigured ? (
-            <p className="text-sm text-stone-500">Supabase env vars are still missing. Add them to `.env.local` before signing in.</p>
-          ) : null}
+          <p className="text-sm text-stone-500">No Supabase connection is required. Configure `VITE_ADMIN_EMAIL` and `VITE_ADMIN_PASSWORD` only if you want a local gate.</p>
         </form>
       </div>
     );
